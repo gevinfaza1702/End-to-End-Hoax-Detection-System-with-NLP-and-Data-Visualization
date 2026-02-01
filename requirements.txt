@@ -1,0 +1,11 @@
+gnews
+snscrape
+praw
+transformers
+torch
+schedule
+sqlalchemy
+streamlit
+pandas
+python-dotenv
+requests

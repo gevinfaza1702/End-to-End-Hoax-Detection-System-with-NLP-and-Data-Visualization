@@ -22,7 +22,7 @@ import argparse
 import pandas as pd
 import streamlit as st
 
-from social_media_agent import Database, PostModel
+from database import Database, PostModel
 
 
 def load_data(db: Database, limit: int = 1000) -> pd.DataFrame:
