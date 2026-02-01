@@ -42,6 +42,14 @@ class NewsClassifier:
                 return_all_scores=True if task == "text-classification" else None,
                 truncation=True
             )
+        except ValueError as e:
+            if "sentencepiece" in str(e).lower() or "tiktoken" in str(e).lower():
+                logger.error(
+                    "Missing dependency for model tokenizer. "
+                    "Please install required packages:\n\n"
+                    "    pip install sentencepiece protobuf\n"
+                )
+            raise e
         except Exception as e:
             logger.error(f"Failed to load model {model_name}: {e}")
             raise e

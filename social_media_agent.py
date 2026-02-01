@@ -16,6 +16,8 @@ import logging
 import time
 from typing import Iterable, List
 
+from dotenv import load_dotenv
+
 # Local imports
 import config
 from structures import Post
@@ -28,6 +30,8 @@ from scrapers import TwitterScraper, RedditScraper, GoogleNewsScraper
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
+# Load environment variables
+load_dotenv()
 
 class Scheduler:
     """
