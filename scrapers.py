@@ -3,7 +3,9 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import os
-from typing import Iterable, List, Optional
+import time
+import random
+from typing import Iterable, List, Optional, Callable, Any
 
 # Third‑party imports
 try:
@@ -25,6 +27,29 @@ from structures import Post
 
 logger = logging.getLogger(__name__)
 
+def random_sleep(min_seconds: float = 1.0, max_seconds: float = 3.0) -> None:
+    """Sleep for a random amount of time to avoid rate limiting."""
+    sleep_time = random.uniform(min_seconds, max_seconds)
+    time.sleep(sleep_time)
+
+def retry_request(max_retries: int = 3, delay: float = 2.0) -> Callable:
+    """Decorator to retry a function call upon exception."""
+    def decorator(func: Callable) -> Callable:
+        def wrapper(*args, **kwargs) -> Any:
+            retries = 0
+            while retries < max_retries:
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    retries += 1
+                    logger.warning(f"Error in {func.__name__}: {e}. Retrying ({retries}/{max_retries})...")
+                    time.sleep(delay)
+            logger.error(f"Failed {func.__name__} after {max_retries} retries.")
+            return [] # Return empty list on failure for fetch methods
+        return wrapper
+    return decorator
+
+
 class TwitterScraper:
     """
     Scrape tweets matching a list of keywords using snscrape.
@@ -43,6 +68,8 @@ class TwitterScraper:
             logger.info(f"Scraping Twitter for keyword: {keyword}")
             query = f"{keyword} lang:id"
             try:
+                # Add retry logic manually or via helper if needed.
+                # snscrape generator is hard to retry cleanly with a simple decorator.
                 scraper = sntwitter.TwitterSearchScraper(query)
                 for i, tweet in enumerate(scraper.get_items()):
                     if i >= self.max_tweets:
@@ -56,8 +83,15 @@ class TwitterScraper:
                         author=tweet.user.username
                     )
                     posts.append(post)
+                    # Anti-blocking sleep every 10 tweets
+                    if i % 10 == 0:
+                        random_sleep(0.5, 1.5)
+
             except Exception as e:
                 logger.error(f"Error scraping Twitter for {keyword}: {e}")
+
+            random_sleep(2.0, 5.0) # Sleep between keywords
+
         return posts
 
 
@@ -92,20 +126,27 @@ class RedditScraper:
         for keyword in self.keywords:
             logger.info(f"Scraping Reddit for keyword: {keyword}")
             try:
-                submissions = self.reddit.subreddit("all").search(keyword, sort="new", limit=self.max_posts)
-                for submission in submissions:
-                    post = Post(
-                        platform="reddit",
-                        keyword=keyword,
-                        content=submission.title + "\n\n" + (submission.selftext or ""),
-                        url=submission.url,
-                        created_at=dt.datetime.fromtimestamp(submission.created_utc),
-                        author=submission.author.name if submission.author else None
-                    )
-                    posts.append(post)
+                # PRAW handles rate limiting internally, but we can add retries
+                self._fetch_reddit_keyword(keyword, posts)
             except Exception as e:
                 logger.error(f"Error scraping Reddit for {keyword}: {e}")
+
+            random_sleep(1.0, 3.0) # Sleep between keywords
         return posts
+
+    @retry_request(max_retries=3, delay=5.0)
+    def _fetch_reddit_keyword(self, keyword: str, posts_list: List[Post]) -> None:
+        submissions = self.reddit.subreddit("all").search(keyword, sort="new", limit=self.max_posts)
+        for submission in submissions:
+            post = Post(
+                platform="reddit",
+                keyword=keyword,
+                content=submission.title + "\n\n" + (submission.selftext or ""),
+                url=submission.url,
+                created_at=dt.datetime.fromtimestamp(submission.created_utc),
+                author=submission.author.name if submission.author else None
+            )
+            posts_list.append(post)
 
 
 class GoogleNewsScraper:
@@ -137,43 +178,52 @@ class GoogleNewsScraper:
         for keyword in self.keywords:
             logger.info(f"Scraping Google News for keyword: {keyword}")
             try:
-                results = self.client.get_news(keyword)  # type: ignore
+                self._fetch_google_keyword(keyword, posts)
             except Exception as exc:
                 logger.error(f"Error fetching Google News for {keyword}: {exc}")
                 continue
-            for item in results:
-                title = item.get('title', '') or ''
-                description = item.get('description', '') or ''
-                content = f"{title}\n\n{description}".strip()
-                url = item.get('url', '')
-                published_str = item.get('published date') or item.get('published_date')
-                created_at: dt.datetime
-                if published_str:
-                    try:
-                        created_at = dt.datetime.strptime(published_str, '%a, %d %b %Y %H:%M:%S %Z')
-                    except Exception:
-                        try:
-                            created_at = dt.datetime.strptime(published_str, '%Y-%m-%dT%H:%M:%SZ')
-                        except Exception:
-                            created_at = dt.datetime.utcnow()
-                else:
-                    created_at = dt.datetime.utcnow()
 
-                publisher = item.get("publisher")
-                if isinstance(publisher, dict):
-                    author = publisher.get("title")
-                elif isinstance(publisher, str):
-                    author = publisher
-                else:
-                    author = None
-
-                post = Post(
-                    platform="google",
-                    keyword=keyword,
-                    content=content,
-                    url=url,
-                    created_at=created_at,
-                    author=author
-                )
-                posts.append(post)
+            random_sleep(1.0, 3.0) # Sleep between keywords
         return posts
+
+    @retry_request(max_retries=3, delay=2.0)
+    def _fetch_google_keyword(self, keyword: str, posts_list: List[Post]) -> None:
+        results = self.client.get_news(keyword)  # type: ignore
+        if not results:
+             return
+
+        for item in results:
+            title = item.get('title', '') or ''
+            description = item.get('description', '') or ''
+            content = f"{title}\n\n{description}".strip()
+            url = item.get('url', '')
+            published_str = item.get('published date') or item.get('published_date')
+            created_at: dt.datetime
+            if published_str:
+                try:
+                    created_at = dt.datetime.strptime(published_str, '%a, %d %b %Y %H:%M:%S %Z')
+                except Exception:
+                    try:
+                        created_at = dt.datetime.strptime(published_str, '%Y-%m-%dT%H:%M:%SZ')
+                    except Exception:
+                        created_at = dt.datetime.utcnow()
+            else:
+                created_at = dt.datetime.utcnow()
+
+            publisher = item.get("publisher")
+            if isinstance(publisher, dict):
+                author = publisher.get("title")
+            elif isinstance(publisher, str):
+                author = publisher
+            else:
+                author = None
+
+            post = Post(
+                platform="google",
+                keyword=keyword,
+                content=content,
+                url=url,
+                created_at=created_at,
+                author=author
+            )
+            posts_list.append(post)

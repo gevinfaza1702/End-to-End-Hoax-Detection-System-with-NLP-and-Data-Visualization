@@ -16,6 +16,8 @@ import logging
 import time
 from typing import Iterable, List
 
+from dotenv import load_dotenv
+
 # Local imports
 import config
 from structures import Post
@@ -28,6 +30,8 @@ from scrapers import TwitterScraper, RedditScraper, GoogleNewsScraper
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
+# Load environment variables
+load_dotenv()
 
 class Scheduler:
     """
@@ -126,16 +130,28 @@ class Scheduler:
             logger.info(f"🔍 Label: {post.predicted_label} | Score: {post.prediction_score:.2f}")
 
             if self.fact_checker is not None and post.predicted_label == "hoax":
-                # 💡 Optimasi: gunakan keyword pendek untuk fact check
-                claim_query = self.extract_claim_keywords(post.content).strip()
-                if claim_query:
-                    claim_query += " " + post.keyword  # tambahkan keyword dari scraping
+                # 💡 Optimasi: Gunakan judul/kalimat pertama konten untuk query yang lebih spesifik
+                # Ambil baris pertama sebagai 'judul'
+                lines = post.content.split('\n')
+                title_query = lines[0].strip() if lines else ""
+
+                # Jika judul terlalu pendek (< 3 kata), gabungkan dengan keyword
+                if len(title_query.split()) < 3:
+                    claim_query = f"{title_query} {post.keyword}".strip()
                 else:
-                    claim_query = post.keyword
+                    # Potong jika terlalu panjang (max 15 kata untuk query API)
+                    claim_query = " ".join(title_query.split()[:15])
 
                 logger.info(f"🔎 Fact-checking with query: {claim_query}")
 
+                # Coba cari dengan query judul
                 fc_result = self.fact_checker.search_claim(claim_query)
+
+                # Jika tidak ketemu, coba fallback pakai keyword saja
+                if not fc_result:
+                    fallback_query = f"{post.keyword} hoaks"
+                    logger.info(f"⚠️ No result, retrying with fallback query: {fallback_query}")
+                    fc_result = self.fact_checker.search_claim(fallback_query, similarity_threshold=40)
                 if fc_result:
                     logger.info(f"✅ Found fact-check: {fc_result.get('title')} ({fc_result.get('url')})")
                     post.fact_check_url = fc_result.get("url")

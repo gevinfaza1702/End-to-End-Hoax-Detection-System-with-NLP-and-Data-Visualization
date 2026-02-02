@@ -9,3 +9,7 @@ streamlit
 pandas
 python-dotenv
 requests
+sentencepiece
+protobuf
+thefuzz
+plotly
