@@ -129,7 +129,9 @@ def main(db_url: str) -> None:
 
         # Style the dataframe (highlight hoax)
         def highlight_hoax(row):
-            return ['background-color: #ffe6e6'] * len(row) if row.predicted_label == 'hoax' else [''] * len(row)
+            if row.predicted_label == 'hoax':
+                return ['background-color: #ffe6e6; color: black'] * len(row)
+            return [''] * len(row)
 
         st.dataframe(
             df_display.style.apply(highlight_hoax, axis=1),

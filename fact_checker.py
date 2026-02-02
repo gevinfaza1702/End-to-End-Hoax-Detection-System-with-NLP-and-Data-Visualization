@@ -36,7 +36,7 @@ class FactChecker:
             logger.warning("No API key provided for FactChecker. Fact checking will be disabled.")
         self.language_code = language_code
 
-    def search_claim(self, text: str, max_age_days: int = 1000, similarity_threshold: int = 60) -> Optional[Dict[str, Any]]:
+    def search_claim(self, text: str, max_age_days: int = 1000, similarity_threshold: int = 50) -> Optional[Dict[str, Any]]:
         """
         Search for fact‑checked claims matching the given text.
 
@@ -47,6 +47,7 @@ class FactChecker:
         to the input text.
         """
         if not self.api_key:
+            logger.warning("Skipping fact check: No API Key provided.")
             return None
         params = {
             "query": text,
